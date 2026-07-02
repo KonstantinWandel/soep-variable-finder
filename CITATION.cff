@@ -1,0 +1,20 @@
+cff-version: 1.2.0
+title: "SOEP Variable Finder: multilingual semantic search over SOEP-Core variable metadata"
+message: "If you use this software, please cite it using these metadata."
+type: software
+authors:
+  - given-names: Konstantin
+    family-names: Wandel
+    email: konstantin.wandel@uni-bielefeld.de
+    affiliation: "Universität Bielefeld"
+    orcid: "https://orcid.org/0009-0007-3321-7774"
+repository-code: "https://github.com/KonstantinWandel/soep-variable-finder"
+license: MIT
+version: 0.1.0
+date-released: "2026-07-02"
+keywords:
+  - semantic search
+  - cross-encoder reranking
+  - SOEP
+  - survey variable metadata
+  - variable discovery

@@ -1,0 +1,12 @@
+{
+  "title": "SOEP Variable Finder: multilingual semantic search over SOEP-Core variable metadata",
+  "description": "Semantic discovery of SOEP-Core survey-variable metadata: plain-language search over German labels and English descriptions with a multilingual bge-m3 bi-encoder and a cross-encoder reranker, plus a dataset-authority prior that surfaces canonical analysis-ready variables (e.g. pgen/pglabnet) over chattier subsample items. This record is the SOEP-variable deployment of the shared GeoLAB metadata-finder codebase (the INKAR regional-indicator deployment is archived separately). Code only; no microdata included.",
+  "upload_type": "software",
+  "license": "MIT",
+  "version": "0.1.0",
+  "publication_date": "2026-07-02",
+  "creators": [
+    { "name": "Wandel, Konstantin", "affiliation": "Universität Bielefeld", "orcid": "0009-0007-3321-7774" }
+  ],
+  "keywords": ["semantic search","cross-encoder reranking","SOEP","survey variable metadata","variable discovery"]
+}
