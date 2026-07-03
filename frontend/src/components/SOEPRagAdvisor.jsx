@@ -24,6 +24,14 @@ function SOEPRagAdvisor({ apiUrl, mode = 'all' }) {
     NUTS2: 'NUTS2 region',
   }
 
+  // Per-finder citation (each deployment is archived on Zenodo under its own DOI).
+  const CITATION = {
+    soep: { title: 'SOEP Variable Finder', doi: '10.5281/zenodo.21134306' },
+    inkar: { title: 'GeoLAB Regional Indicator Finder', doi: '10.5281/zenodo.21134145' },
+    all: { title: 'GeoLAB Metadata Finders', doi: '10.5281/zenodo.21134145' },
+  }
+  const cite = CITATION[mode] || CITATION.all
+
   const [question, setQuestion] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
@@ -287,7 +295,7 @@ function SOEPRagAdvisor({ apiUrl, mode = 'all' }) {
                     <td>
                       <div style={{ fontWeight: 'bold' }}>{row.variable_name}</div>
                       <div style={{ fontSize: '0.85rem', color: 'var(--muted)' }}>{row.label}</div>
-                      {row.theme && <div className="mini-chip">{row.theme}</div>}
+                      {row.source_key === 'inkar' && row.theme && <div className="mini-chip">{row.theme}</div>}
                     </td>
                     <td>
                       <div>{row.source_label}</div>
@@ -468,6 +476,11 @@ function SOEPRagAdvisor({ apiUrl, mode = 'all' }) {
           <div ref={messagesEndRef} />
           </div>
         </div>
+      </div>
+
+      <div className="cite-footer text-muted">
+        Please cite: {cite.title} —{' '}
+        <a href={`https://doi.org/${cite.doi}`} target="_blank" rel="noreferrer">doi.org/{cite.doi}</a>
       </div>
     </div>
   )

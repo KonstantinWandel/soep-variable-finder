@@ -9,6 +9,7 @@ authors:
     affiliation: "Universität Bielefeld"
     orcid: "https://orcid.org/0009-0007-3321-7774"
 repository-code: "https://github.com/KonstantinWandel/soep-variable-finder"
+doi: "10.5281/zenodo.21134306"
 license: MIT
 version: 0.1.0
 date-released: "2026-07-02"
