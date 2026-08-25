@@ -47,3 +47,6 @@ dist/
 **/build_log*.txt
 **/analysis_log.txt
 README_SOEP_RAG.md
+
+# SOEP microdata drops (v41 / SOEP-IS): never commit data
+new_data/
