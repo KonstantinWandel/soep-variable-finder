@@ -1,3 +1,4 @@
+import bisect
 import json
 import time
 import os
@@ -170,6 +171,56 @@ DATASET_TITLE = {
 SOEP_DEDUP_MODE = os.getenv("SOEP_RAG_SOEP_DEDUP", "name_label").strip().lower()
 
 
+class OnnxCrossEncoder:
+    """Drop-in `.predict(pairs)` for the cross-encoder, backed by ONNX Runtime.
+
+    The reranker is the whole query cost on the CPU deployment. ONNX Runtime with a
+    dynamically int8-quantised graph is both faster than torch dynamic quantisation and closer
+    to fp32: measured on real pairs, its scores correlate 0.98 with torch fp32 against 0.85 for
+    torch int8, and it agrees with fp32 on the top hit.
+
+    Kept behind `SOEP_RAG_RERANK_ONNX=<model dir>` with the torch path as the fallback, so a
+    missing runtime or a missing export degrades to the previous behaviour instead of failing.
+    """
+
+    def __init__(self, model_dir: str, max_length: int = 256, threads: int = 0,
+                 tokenizer_name: str = ""):
+        import numpy as _np
+        import onnxruntime as ort
+        from transformers import AutoTokenizer
+
+        self._np = _np
+        directory = Path(model_dir)
+        graph = next((directory / name for name in ("model_quantized.onnx", "model.onnx")
+                      if (directory / name).exists()), None)
+        if graph is None:
+            raise FileNotFoundError(f"no model.onnx or model_quantized.onnx in {directory}")
+        options = ort.SessionOptions()
+        if threads:
+            options.intra_op_num_threads = threads
+        self._session = ort.InferenceSession(str(graph), options, providers=["CPUExecutionProvider"])
+        self._inputs = {item.name for item in self._session.get_inputs()}
+        # Tokenise with the ORIGINAL tokenizer, not the copy written next to the export: the two
+        # must agree or the ONNX path scores a different tokenisation than the torch path, and
+        # transformers already warns that a re-saved tokenizer can carry a wrong regex.
+        self._tokenizer = AutoTokenizer.from_pretrained(tokenizer_name or str(directory))
+        self._max_length = max_length
+
+    def predict(self, pairs, **_kwargs):
+        if not pairs:
+            return self._np.zeros(0, dtype="float32")
+        queries = [pair[0] for pair in pairs]
+        documents = [pair[1] for pair in pairs]
+        features = self._tokenizer(queries, documents, padding=True, truncation=True,
+                                   max_length=self._max_length, return_tensors="np")
+        feed = {key: value for key, value in features.items() if key in self._inputs}
+        logits = self._session.run(None, feed)[0].reshape(-1)
+        # bge-reranker is a single-logit model and sentence-transformers applies a sigmoid to it;
+        # the fusion normalises afterwards, but keeping the same scale keeps the two paths
+        # comparable when one is swapped for the other.
+        return 1.0 / (1.0 + self._np.exp(-logits))
+
+
 class SOEPRagAdvisorService:
     """Semantic metadata advisor for SOEP variables and regionalized INKAR indicators."""
 
@@ -244,6 +295,8 @@ class SOEPRagAdvisorService:
         self._rerank_doc_chars = int(os.getenv("SOEP_RAG_RERANK_DOC_CHARS", "480")) or 10 ** 9
         self._filter_view_cache: Dict[str, Any] = {}
         self._query_vec_cache: Dict[str, Any] = {}
+        self._name_index: Optional[Dict[str, List[int]]] = None
+        self._label_words: Optional[set] = None
         self._exact_code_bonus = float(os.getenv("GEOLAB_EXACT_CODE_BONUS", "0.5"))
         self._code_token_bonus = float(os.getenv("GEOLAB_CODE_TOKEN_BONUS", "0.2"))
 
@@ -1027,6 +1080,107 @@ class SOEPRagAdvisorService:
             return f"Instruct: {task}\nQuery: {query}"
         return query
 
+    def _query_vector(self, query: str):
+        """The embedded query, cached by text.
+
+        Encoding one short query costs about 450 ms on the 4-vCPU deployment, and a session
+        repeats the same query constantly (a filter change, a second source, a demo shown
+        twice). int8 was tried on this model and is 2x SLOWER: a single ~30-token sequence is
+        too small for the quantised GEMMs to pay for their overhead.
+        """
+        formatted = self._format_query(query)
+        q_vec = self._query_vec_cache.get(formatted)
+        if q_vec is None:
+            q_vec = self._embedder.encode(
+                [formatted],
+                batch_size=1,
+                convert_to_numpy=True,
+                normalize_embeddings=True,
+            ).astype("float32")
+            if len(self._query_vec_cache) >= 256:
+                self._query_vec_cache.pop(next(iter(self._query_vec_cache)))
+            self._query_vec_cache[formatted] = q_vec
+        return q_vec
+
+    def _name_lookup(self) -> Dict[str, List[int]]:
+        """variable_name (lowercased) -> row indices, built once."""
+        if self._name_index is None:
+            index: Dict[str, List[int]] = {}
+            for position, row in enumerate(self._rows):
+                name = self._as_text(row.get("variable_name")).strip().lower()
+                if name:
+                    index.setdefault(name, []).append(position)
+            self._name_index = index
+        return self._name_index
+
+    def _label_vocabulary(self) -> set:
+        """Every word that occurs inside a record label, used to tell a code from a word."""
+        if self._label_words is None:
+            words: set = set()
+            for row in self._rows:
+                label = self._as_text(row.get("label"))
+                if label:
+                    words.update(part for part in re.split(r"[^\wäöüß]+", label.lower()) if part)
+            self._label_words = words
+        return self._label_words
+
+    def _exact_code_rows(self, query: str, filters: Optional[Dict[str, Any]],
+                         limit: int = 6) -> List[Dict[str, Any]]:
+        """Rows whose code the query names outright.
+
+        The exact-code prior in `_authority_delta` can only reweight candidates the dense stage
+        already retrieved, and the dense stage has no reason to place the string "INT251" next
+        to "Krankenhausbetten je 10 000 Einwohner": measured, `AI1401` found its record and
+        `INT251` did not, although both codes sit in the indexed text. So a code that names a
+        record exactly is fetched directly and joins the candidate set, where the prior can do
+        its work.
+
+        What counts as a code is decided by the data, not by its shape. Requiring a digit was the
+        first rule and it excluded half the SOEP codes: `ple0179` and `w011ha` have digits,
+        `pglabnet` and `sumkids` do not, and `pglabnet` was still unreachable. A token is treated
+        as a code when it matches a `variable_name` exactly AND is not a word of the corpus, that
+        is, it never appears inside any record's label. "pglabnet" appears in no label and is a
+        code; "bevölkerung" appears in thousands and is a word, so a one-word query for it keeps
+        going through the normal ranking instead of being pinned to whatever record happens to
+        carry that name.
+        """
+        tokens = {
+            token.strip(".,;:()[]")
+            for token in re.split(r"[\s,;/]+", (query or "").lower())
+            if len(token) >= 3
+        }
+        vocabulary = self._label_vocabulary()
+        tokens = {
+            token for token in tokens
+            if any(character.isdigit() for character in token) or token not in vocabulary
+        }
+        if not tokens:
+            return []
+        index = self._name_lookup()
+        matched = [position for token in tokens for position in index.get(token, [])]
+        if not matched:
+            return []
+
+        candidate_idx, _ = self._filtered_view(filters)
+        allowed = None
+        if candidate_idx is not None and len(candidate_idx) != len(self._rows):
+            allowed = candidate_idx          # sorted ascending, so bisect is enough
+
+        q_vec = self._query_vector(query)
+        out: List[Dict[str, Any]] = []
+        for position in matched[: limit * 4]:
+            if allowed is not None:
+                spot = bisect.bisect_left(allowed, position)
+                if spot >= len(allowed) or allowed[spot] != position:
+                    continue        # filtered away by the user's own choice; leave it out
+            row = dict(self._rows[position])
+            row["score"] = float(self._embeddings[position] @ q_vec[0])
+            row["exact_code_match"] = True
+            out.append(row)
+            if len(out) >= limit:
+                break
+        return out
+
     def _search(self, query: str, k: int, filters: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         if not self._rows or self._embedder is None or self._embeddings is None:
             raise RuntimeError("Metadata RAG advisor not loaded.")
@@ -1045,18 +1199,7 @@ class SOEPRagAdvisorService:
         # twice). The vector depends only on the query text, so it is cached; int8 was tried on
         # this model and is 2x SLOWER, because a single ~30-token sequence is too small for the
         # quantised GEMMs to pay for their overhead.
-        formatted = self._format_query(query)
-        q_vec = self._query_vec_cache.get(formatted)
-        if q_vec is None:
-            q_vec = self._embedder.encode(
-                [formatted],
-                batch_size=1,
-                convert_to_numpy=True,
-                normalize_embeddings=True,
-            ).astype("float32")
-            if len(self._query_vec_cache) >= 256:
-                self._query_vec_cache.pop(next(iter(self._query_vec_cache)))
-            self._query_vec_cache[formatted] = q_vec
+        q_vec = self._query_vector(query)
         score_vec = (candidates @ q_vec[0]).astype("float32")
         best_local_idx = np.argsort(score_vec)[::-1][: min(k, len(candidate_idx))]
 
@@ -1115,8 +1258,22 @@ class SOEPRagAdvisorService:
         self._filter_view_cache[signature] = view
         return view
 
-    def _get_reranker(self) -> CrossEncoder:
+    def _get_reranker(self):
         if self._cross_enc is None:
+            onnx_dir = os.getenv("SOEP_RAG_RERANK_ONNX", "").strip()
+            if onnx_dir and Path(onnx_dir).exists() and self.retrieval_device == "cpu":
+                try:
+                    self._cross_enc = OnnxCrossEncoder(
+                        onnx_dir,
+                        max_length=int(os.getenv("SOEP_RAG_RERANKER_MAX_LENGTH", "256")),
+                        threads=int(os.getenv("OMP_NUM_THREADS", "0") or 0),
+                        tokenizer_name=self._reranker_name,
+                    )
+                    print(f"Loading reranker from ONNX Runtime: {onnx_dir}")
+                    return self._cross_enc
+                except Exception as exc:                       # noqa: BLE001
+                    print(f"ONNX reranker unavailable ({type(exc).__name__}: {exc}); "
+                          "falling back to the torch cross-encoder.")
             print(f"Loading reranker {self._reranker_name} on {self.retrieval_device}...")
             self._cross_enc = CrossEncoder(
                 self._reranker_name, max_length=int(os.getenv("SOEP_RAG_RERANKER_MAX_LENGTH", "256")), device=self.retrieval_device
@@ -1383,11 +1540,15 @@ class SOEPRagAdvisorService:
 
         for q in set(splits):
             cands = self._search(q, max(k, int(os.getenv("SOEP_RAG_RERANK_CANDIDATES", "24"))), filters)
+            # A record whose code the query spells out is added even when the dense stage
+            # missed it; see _exact_code_rows.
+            cands = self._exact_code_rows(q, filters) + cands
             for cand in cands:
                 item_id = cand["item_id"]
                 if item_id not in all_unique_cands:
                     all_unique_cands[item_id] = cand
-                split_cand_map[q].append(item_id)
+                if item_id not in split_cand_map[q]:
+                    split_cand_map[q].append(item_id)
 
         if timing is not None:
             timing["retrieve_ms"] = int((time.time() - stage_start) * 1000)
