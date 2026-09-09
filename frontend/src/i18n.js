@@ -14,7 +14,7 @@ export const LANGUAGES = [
 export const STRINGS = {
   en: {
     'theme.aria': 'Theme',
-    'theme.default': 'Default',
+    'theme.system': 'System',
     'theme.dark': 'Dark',
     'theme.light': 'Light',
     'lang.aria': 'Language',
@@ -134,6 +134,11 @@ export const STRINGS = {
     'legal.privacy': 'Privacy',
     'legal.sources': 'Data sources and attribution',
 
+    'footer.partners': 'Partners and funding',
+    'footer.blurb': 'An open platform for social scientists working with geospatial data.',
+    'footer.contact': 'Contact',
+    'footer.legal': 'Legal',
+
     'source.all': 'All metadata sources',
     'source.soep': 'SOEP-Core variables',
     'source.inkar': 'INKAR regional indicators',
@@ -154,7 +159,7 @@ export const STRINGS = {
 
   de: {
     'theme.aria': 'Darstellung',
-    'theme.default': 'Systemvorgabe',
+    'theme.system': 'Systemvorgabe',
     'theme.dark': 'Dunkel',
     'theme.light': 'Hell',
     'lang.aria': 'Sprache',
@@ -273,6 +278,11 @@ export const STRINGS = {
     'legal.imprint': 'Impressum',
     'legal.privacy': 'Datenschutz',
     'legal.sources': 'Datenquellen und Attribution',
+
+    'footer.partners': 'Partner und Förderung',
+    'footer.blurb': 'Eine offene Plattform für Sozialwissenschaftlerinnen und Sozialwissenschaftler, die mit Geodaten arbeiten.',
+    'footer.contact': 'Kontakt',
+    'footer.legal': 'Rechtliches',
 
     'source.all': 'Alle Metadatenquellen',
     'source.soep': 'SOEP-Core-Variablen',
