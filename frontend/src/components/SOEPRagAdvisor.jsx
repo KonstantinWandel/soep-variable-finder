@@ -3,13 +3,47 @@ import { makeTranslator, shortenPath, datasetLabel, sortSpatialLevels } from '..
 
 // The project site carries the imprint, the privacy statement and the attribution list.
 const GEOLAB_SITE = 'https://geolab.soz.uni-bielefeld.de'
+const LINK_BUILDER = `${GEOLAB_SITE}/tools/link-builder/`
+const MEASURE_REGISTER = `${GEOLAB_SITE}/tools/measure-register/`
+
+// Dieselbe Größe erscheint bei mehreren Quellen mit verschiedenen Nennern, und zwei so gebaute
+// Zahlen sind nicht vergleichbar. Das steht im Merkmalsregister, und bis jetzt musste man wissen,
+// dass es das gibt. Die fünfzehn Begriffe kommen aus `measure_concepts.json`, erzeugt aus dem
+// Register selbst (scripts/build_measure_concepts.py), mitsamt der geschriebenen Regel, die dort
+// über die Zugehörigkeit entscheidet. Eine zweite, ähnlich gemeinte Regel wäre der Weg, auf dem
+// die beiden Seiten irgendwann verschiedene Antworten geben.
+function useMeasureConcepts() {
+  const [concepts, setConcepts] = useState([])
+  useEffect(() => {
+    let lebt = true
+    fetch(`${import.meta.env.BASE_URL || '/'}measure_concepts.json`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (lebt && d && Array.isArray(d.concepts)) setConcepts(d.concepts) })
+      .catch(() => {})
+    return () => { lebt = false }
+  }, [])
+  return concepts
+}
+
+function matchConcept(concepts, label) {
+  const t = String(label || '').toLowerCase()
+  if (!t) return null
+  for (const c of concepts) {
+    try {
+      if (c.not && new RegExp(c.not, 'i').test(t)) continue
+      if (c.rule && new RegExp(c.rule, 'i').test(t)) return c
+    } catch { /* eine kaputte Regel darf die Trefferliste nicht mitnehmen */ }
+  }
+  return null
+}
 
 // One facet: a dropdown that opens onto checkboxes. A plain <select> holds exactly one value, so
 // comparing two sources or three spatial levels meant running the same search once per value.
 // Collapsed it shows what is chosen; nothing checked means no restriction, which is the honest
 // reading of an empty list. The list expands in flow rather than as an overlay, because the filter
 // column scrolls and an absolutely positioned panel would be clipped by it.
-function FacetChecks({ label, options, selected, onToggle, onClear, allLabel, emptyHint, closeLabel }) {
+function FacetChecks({ label, options, selected, onToggle, onClear, allLabel, emptyHint,
+                      closeLabel, counts, leerHinweis, hinweis }) {
   const [open, setOpen] = useState(false)
   // Which way the menu opens and how tall it may be, measured rather than assumed: a fixed
   // height ran off the bottom of the window for three of the four facets on a 900px screen.
@@ -69,17 +103,35 @@ function FacetChecks({ label, options, selected, onToggle, onClear, allLabel, em
       </button>
       {open && (
         <div className="facet-list" style={{ maxHeight: `${place.maxHeight}px` }}>
+          {/* Wo eine Auswahl etwas anderes bedeutet, als ihr Name vermuten lässt, steht es
+              hier, beim Aufklappen, und nicht in einer Hilfe, die niemand öffnet. */}
+          {hinweis && <p className="facet-hint">{hinweis}</p>}
           {options.length === 0 && <p className="facet-empty">{emptyHint}</p>}
-          {options.map((option) => (
-            <label className="facet-item" key={option.value} title={option.title || option.label}>
-              <input
-                type="checkbox"
-                checked={selected.includes(option.value)}
-                onChange={() => onToggle(option.value)}
-              />
-              <span>{option.label}</span>
-            </label>
-          ))}
+          {options.map((option) => {
+            /* Wie viele Sätze diese Wahl noch übrig ließe, gerechnet gegen die ANDEREN
+               Facetten. Null heißt: zusammen mit dem, was schon gewählt ist, gibt es nichts,
+               und dann ist der Haken gesperrt. Was schon gewählt ist, bleibt anklickbar,
+               sonst käme man aus einer Sackgasse nicht mehr heraus. */
+            const zahl = counts ? (counts[option.value] || 0) : null
+            const gewaehlt = selected.includes(option.value)
+            const gesperrt = counts != null && zahl === 0 && !gewaehlt
+            return (
+              <label
+                className={`facet-item${gesperrt ? ' is-empty' : ''}`}
+                key={option.value}
+                title={gesperrt ? leerHinweis : (option.title || option.label)}
+              >
+                <input
+                  type="checkbox"
+                  checked={gewaehlt}
+                  disabled={gesperrt}
+                  onChange={() => onToggle(option.value)}
+                />
+                <span>{option.label}</span>
+                {zahl != null && <span className="facet-count">{zahl.toLocaleString('de-DE')}</span>}
+              </label>
+            )
+          })}
           <div className="facet-actions">
             {chosen > 0 && (
               <button type="button" className="facet-clear" onClick={onClear}>{allLabel}</button>
@@ -94,6 +146,7 @@ function FacetChecks({ label, options, selected, onToggle, onClear, allLabel, em
 
 function SOEPRagAdvisor({ apiUrl, mode = 'all', language = 'en' }) {
   const t = makeTranslator(language)
+  const measureConcepts = useMeasureConcepts()
   const isInkar = mode === 'inkar'
   const isSoep = mode === 'soep'
   const isAll = mode === 'all'
@@ -125,6 +178,19 @@ function SOEPRagAdvisor({ apiUrl, mode = 'all', language = 'en' }) {
   const [droppedFilters, setDroppedFilters] = useState([])
   // Every facet holds a LIST of chosen values; an empty list means no restriction. The SOEP
   // deployment is the exception that pre-selects its own source, because it serves only that one.
+  /* Womit die letzte Suche lief. Die Filter wirken erst beim nächsten Fragen, und ohne diesen
+     Vergleich sah man das der Liste nicht an: Kerstin wählte die Stichprobe "Migration & refugee"
+     und bekam weiter die alten Core-Treffer angezeigt, ohne Hinweis, dass nichts neu geladen
+     worden war. Gemeldet am 2026-09-11. */
+  /* Welche Auswahl noch wie viel übrig ließe. Wird bei jeder Änderung neu geholt, damit die
+     Auswahllisten nur anbieten, was zusammenpasst: ein Datensatz und eine Stichprobe, die
+     darin nicht vorkommt, ergeben zusammen nichts, und das gehört vor die Suche und nicht
+     danach in eine leere Trefferliste. */
+  const [facetCounts, setFacetCounts] = useState(null)
+
+  const [letzteFilter, setLetzteFilter] = useState(null)
+  const [letzteFrage, setLetzteFrage] = useState('')
+
   const [filters, setFilters] = useState({
     dataset_scope: isSoep ? ['soep'] : [],
     dataset_label: [],
@@ -173,9 +239,27 @@ function SOEPRagAdvisor({ apiUrl, mode = 'all', language = 'en' }) {
     const hist = localStorage.getItem(STORAGE_KEY)
     if (hist) {
       try {
-        setChatHistory(JSON.parse(hist))
+        /* Ein einziger unbrauchbarer Eintrag im gespeicherten Verlauf hat die ganze Seite
+           geleert: die Liste wird beim Aufbau durchlaufen, und an `null.role` stirbt der
+           Aufbau. Der Browser-Cache zu leeren half nicht, denn der Verlauf liegt im
+           localStorage; im Inkognitofenster war er leer, und dort ging alles. Was nicht wie
+           ein Eintrag aussieht, wird beim Laden verworfen. */
+        const roh = JSON.parse(hist)
+        const sauber = Array.isArray(roh)
+          ? roh.filter((m) => m && typeof m === 'object' && typeof m.role === 'string')
+          : []
+        /* Auch beim Laden gekürzt, sonst bleibt ein längst zu groß gewordener Verlauf für
+           immer zu groß: gespeichert wurde er ja vor dieser Begrenzung. */
+        const gekuerzt = sauber.slice(-12)
+        if (gekuerzt.length !== (Array.isArray(roh) ? roh.length : 0)) {
+          try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(gekuerzt))
+          } catch (e) { localStorage.removeItem(STORAGE_KEY) }
+        }
+        setChatHistory(gekuerzt)
       } catch (e) {
         console.error(e)
+        localStorage.removeItem(STORAGE_KEY)
       }
     }
   }, [])
@@ -231,6 +315,37 @@ function SOEPRagAdvisor({ apiUrl, mode = 'all', language = 'en' }) {
     }
   }, [apiUrl, filters.dataset_scope, filters.include_raw])
 
+  /* Die Anzahlen je Auswahl, gegen die jeweils anderen Facetten gerechnet. Kurz verzögert,
+     damit ein schnelles Durchklicken nicht ein halbes Dutzend Anfragen auslöst, und mit einem
+     Abbruch, damit eine überholte Antwort nicht die neuere überschreibt. */
+  useEffect(() => {
+    const abbruch = new AbortController()
+    const uhr = setTimeout(() => {
+      fetch(`${apiUrl}/soep/facet-counts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: abbruch.signal,
+        body: JSON.stringify({
+          dataset_scope: filters.dataset_scope?.length ? filters.dataset_scope : null,
+          dataset_label: filters.dataset_label?.length ? filters.dataset_label : null,
+          sample_group: filters.sample_group?.length ? filters.sample_group : null,
+          spatial_level: filters.spatial_level?.length ? filters.spatial_level : null,
+          theme: filters.theme?.length ? filters.theme : null,
+          year_start: filters.year_start ? Number(filters.year_start) : null,
+          year_end: filters.year_end ? Number(filters.year_end) : null,
+          regional_only: Boolean(filters.regional_only),
+          include_raw: Boolean(filters.include_raw),
+        }),
+      })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => { if (d) setFacetCounts(d) })
+        .catch(() => { /* abgebrochen oder kurz nicht erreichbar: dann eben ohne Anzahlen */ })
+    }, 250)
+    return () => { clearTimeout(uhr); abbruch.abort() }
+  }, [apiUrl, filters.dataset_scope, filters.dataset_label, filters.sample_group,
+      filters.spatial_level, filters.theme, filters.year_start, filters.year_end,
+      filters.regional_only, filters.include_raw])
+
   useEffect(() => {
     // Keep the TOP of the newest answer (the most relevant results) in view,
     // instead of jumping to the bottom of the results list.
@@ -262,15 +377,28 @@ function SOEPRagAdvisor({ apiUrl, mode = 'all', language = 'en' }) {
 
   const clearFilter = (key) => setFilters((current) => ({ ...current, [key]: [] }))
 
-  const handleAsk = async (e) => {
-    if (e) e.preventDefault()
-    if (!question.trim()) return
+  /* Nur die Felder, die auch mitgeschickt werden: eine Änderung an ihnen ändert das Ergebnis,
+     alles andere nicht. */
+  const FILTERFELDER = ['dataset_scope', 'dataset_label', 'nuts_level', 'spatial_level', 'theme',
+                        'sample_group', 'year_start', 'year_end', 'regional_only', 'include_raw',
+                        'top_k']
+  const filterVeraendert = () => {
+    if (!letzteFilter) return false
+    return FILTERFELDER.some((f) => JSON.stringify(letzteFilter[f] ?? null) !== JSON.stringify(filters[f] ?? null))
+  }
 
-    const userQ = question.trim()
+  const handleAsk = async (e, frageErneut) => {
+    if (e) e.preventDefault()
+    const gestellt = (frageErneut || question).trim()
+    if (!gestellt) return
+
+    const userQ = gestellt
     const filterSnapshot = { ...filters }
+    setLetzteFrage(userQ)
+    setLetzteFilter(filterSnapshot)
     const newHist = [...chatHistory, { role: 'user', content: userQ, filters: filterSnapshot }]
     setChatHistory(newHist)
-    setQuestion('')
+    if (!frageErneut) setQuestion('')
     setLoading(true)
     setError(null)
 
@@ -305,7 +433,19 @@ function SOEPRagAdvisor({ apiUrl, mode = 'all', language = 'en' }) {
 
       const updatedHist = [...newHist, { role: 'assistant', data }]
       setChatHistory(updatedHist)
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedHist))
+      /* Jede Antwort bringt Dutzende Treffer mit langen Beschreibungen mit. Ungekürzt
+         gespeichert ist der Platz nach einigen Dutzend Suchen voll, das Schreiben scheitert,
+         und beim nächsten Besuch baut die Seite minutenlang an einer Liste, die niemand mehr
+         lesen will. Die letzten zwölf Wortmeldungen reichen. */
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedHist.slice(-12)))
+      } catch (e) {
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedHist.slice(-2)))
+        } catch (e2) {
+          localStorage.removeItem(STORAGE_KEY)
+        }
+      }
     } catch (err) {
       setError(err.message || 'Unknown error')
       const updatedHist = [...newHist, { role: 'error', content: err.message || 'Error occurred' }]
@@ -490,6 +630,29 @@ function SOEPRagAdvisor({ apiUrl, mode = 'all', language = 'en' }) {
         : 0
       const flatField = rerankScores.length > 2 && rerankScores[0] - median < 0.015
 
+      /* Die Felder, die eine Zeile von der nächsten unterscheiden sollen. Trägt eines bei
+         allen Treffern denselben Wert, steht es einmal über der Liste statt an jeder Zeile. */
+      const ZEILENFELDER = [
+        { k: 'source', label: t('col.source'), get: (r) => r.source_label || '' },
+        { k: 'dataset', label: isInkar ? t('filter.datasetGeo') : t('filter.datasetSoep'),
+          get: (r) => (r.dataset_label || r.dataset) ? datasetOptionLabel(r.dataset_label || r.dataset) : '' },
+        { k: 'coverage', label: t('col.coverage'), get: (r) => r.available_years_text || '' },
+        { k: 'levels', label: t('filter.spatialLevel'),
+          get: (r) => sortSpatialLevels(r.nuts_levels).join(', ') || sortSpatialLevels(r.spatial_levels).join(', ') },
+        { k: 'theme', label: t('filter.theme'), get: (r) => r.theme ? shortenPath(r.theme) : '' },
+        { k: 'sample', label: t('filter.sampleGroup'),
+          get: (r) => (r.source_key === 'soep' && sampleGroupLabel(r.sample_group)) || '' },
+      ]
+      /* Gleich heißt: mindestens zwei Treffer, überall gefüllt, überall derselbe Wert. Fehlt
+         der Wert bei einem, unterscheidet das Feld ja doch, und dann bleibt es an der Zeile. */
+      const gleichBeiAllen = rows.length > 1
+        ? ZEILENFELDER.map((f) => {
+            const werte = rows.map(f.get)
+            return werte.every((w) => w && w === werte[0]) ? { ...f, wert: werte[0] } : null
+          }).filter(Boolean)
+        : []
+      const einheitlich = new Set(gleichBeiAllen.map((f) => f.k))
+
       const selectedCount = rows.filter((row, idx) => selectedRows[`${i}:${row.item_id || row.variable_name || idx}`]).length
       return (
         <div key={i} className="execution-result glass-panel" style={{ marginBottom: '1.5rem', padding: '1rem' }}>
@@ -501,6 +664,17 @@ function SOEPRagAdvisor({ apiUrl, mode = 'all', language = 'en' }) {
               <button type="button" className="btn-secondary" onClick={() => exportRows(rows, 'json', i)}>JSON</button>
             </div>
           </div>
+          {/* Die Filter wirken erst beim nächsten Fragen. Ohne diesen Hinweis liest sich die
+              unveränderte Liste wie ein kaputter Filter. */}
+          {i === chatHistory.length - 1 && filterVeraendert() && (
+            <p className="results-stale">
+              {t('results.filtersChanged')}{' '}
+              <button type="button" className="btn-secondary"
+                      onClick={() => handleAsk(null, letzteFrage)}>
+                {t('results.reask')}
+              </button>
+            </p>
+          )}
           <p style={{ fontSize: '0.85rem', color: 'var(--muted)', marginTop: '0.6rem' }}>
             {/* The models stay named, that is honest transparency for a research tool. What
                 went is the pipe-delimited debug line around them ("Generator: disabled | Mode:
@@ -508,6 +682,24 @@ function SOEPRagAdvisor({ apiUrl, mode = 'all', language = 'en' }) {
             {t('results.pipeline', { embedding: result.embedding_model })}
           </p>
 
+          {/* Ein Feld, das bei jedem Treffer denselben Wert trägt, unterscheidet nichts und
+              gehört nicht an jede Zeile. Gedruckt wird es dort trotzdem gelesen, und zwar als
+              Aussage über den einzelnen Treffer: wer die Stichprobe "Migration & refugee"
+              wählt und danach unter jedem Treffer "SOEP-Core metadata" liest, hält den Filter
+              für wirkungslos. Das gilt für jedes dieser Felder und für beide Finder: sobald
+              man auf eine Quelle, einen Datensatz oder ein Thema filtert, steht dessen Name
+              sonst zwanzigmal untereinander. Einmal über der Liste gesagt, ist es eine
+              Auskunft; zwanzigmal daneben ist es Lärm. Gemeldet von Kerstin, 2026-09-11. */}
+          {gleichBeiAllen.length > 0 && (
+            <p className="results-uniform">
+              <span className="results-uniform-label">{t('results.sameForAll')}</span>
+              {gleichBeiAllen.map((f) => (
+                <span className="results-uniform-item" key={f.k}>
+                  <span className="results-uniform-key">{f.label}</span> {f.wert}
+                </span>
+              ))}
+            </p>
+          )}
           {flatField && rows.length > 0 && (
             <p className="results-flat">{t('results.flat')}</p>
           )}
@@ -543,8 +735,10 @@ function SOEPRagAdvisor({ apiUrl, mode = 'all', language = 'en' }) {
                       <h4 className="result-label">{row.label || row.variable_name}</h4>
                       <div className="result-ident">
                         <code className="result-code">{row.variable_name}</code>
-                        <span className="result-source">{row.source_label}</span>
-                        {(row.dataset_label || row.dataset) && (
+                        {!einheitlich.has('source') && row.source_label && (
+                          <span className="result-source">{row.source_label}</span>
+                        )}
+                        {!einheitlich.has('dataset') && (row.dataset_label || row.dataset) && (
                           <span className="result-dataset">{datasetOptionLabel(row.dataset_label || row.dataset)}</span>
                         )}
                       </div>
@@ -556,25 +750,28 @@ function SOEPRagAdvisor({ apiUrl, mode = 'all', language = 'en' }) {
                   </div>
 
                   <dl className="result-facts">
-                    <div>
-                      <dt>{t('col.coverage')}</dt>
-                      <dd>{row.available_years_text || t('row.noYears')}</dd>
-                    </div>
+                    {!einheitlich.has('coverage') && (
+                      <div>
+                        <dt>{t('col.coverage')}</dt>
+                        <dd>{row.available_years_text || t('row.noYears')}</dd>
+                      </div>
+                    )}
                     {/* SOEP variables have no spatial level at all, so the field is left out
                         rather than filled with "no spatial level" on every single row. */}
-                    {levels && (
+                    {levels && !einheitlich.has('levels') && (
                       <div>
                         <dt>{t('filter.spatialLevel')}</dt>
                         <dd>{levels}</dd>
                       </div>
                     )}
-                    {row.theme && (
+                    {row.theme && !einheitlich.has('theme') && (
                       <div>
                         <dt>{t('filter.theme')}</dt>
                         <dd title={row.theme}>{shortenPath(row.theme)}</dd>
                       </div>
                     )}
-                    {row.source_key === 'soep' && sampleGroupLabel(row.sample_group) && (
+                    {row.source_key === 'soep' && sampleGroupLabel(row.sample_group)
+                      && !einheitlich.has('sample') && (
                       <div>
                         <dt>{t('filter.sampleGroup')}</dt>
                         <dd>{sampleGroupLabel(row.sample_group)}</dd>
@@ -656,6 +853,35 @@ function SOEPRagAdvisor({ apiUrl, mode = 'all', language = 'en' }) {
                       <a href={row.portal_url} target="_blank" rel="noreferrer">{t('row.portal')}</a>
                     </p>
                   )}
+
+                  {/* Der Schritt nach dem Finden ist das Anspielen, und der geht auf der
+                      GeoLAB-Seite weiter. Die Bezeichnung wird mitgegeben, damit der Planer den
+                      Datensatz gleich vorausgewählt hat statt einer leeren Fläche. Nur im
+                      GeoDB-Modus: im SOEP-Finder sind die Treffer Umfragevariablen, und die
+                      Suche des Planers läuft über Regionaldaten. */}
+                  {mode !== 'soep' && row.label && (
+                    <p className="result-fallback">
+                      <a href={`${LINK_BUILDER}?q=${encodeURIComponent(row.label)}&src=${encodeURIComponent(row.source_key || '')}`}
+                         target="_blank" rel="noreferrer">{t('row.plan')}</a>
+                    </p>
+                  )}
+
+                  {/* Der Schritt, der zwischen Finden und Rechnen fehlt. Ein Treffer sieht aus
+                      wie DIE Arbeitslosenquote, und es sind 64 Fassungen aus 9 Quellen mit 43
+                      verschiedenen Nennern. Wer das nicht weiß, vergleicht später zwei Zahlen,
+                      die nie vergleichbar waren, und nichts in der Auswertung sagt es ihm. */}
+                  {mode !== 'soep' && (() => {
+                    const c = matchConcept(measureConcepts, row.label)
+                    if (!c) return null
+                    return (
+                      <p className="result-register">
+                        {t('row.versions', { n: c.n, sources: c.sources, denominators: c.denominators,
+                                             measure: c.de || c.title })}{' '}
+                        <a href={`${MEASURE_REGISTER}?m=${encodeURIComponent(c.id)}`}
+                           target="_blank" rel="noreferrer">{t('row.compare')}</a>
+                      </p>
+                    )
+                  })()}
                 </li>
               )
             })}
@@ -716,9 +942,28 @@ function SOEPRagAdvisor({ apiUrl, mode = 'all', language = 'en' }) {
             selected={filters.dataset_scope}
             onToggle={(value) => toggleFilter('dataset_scope', value)}
             onClear={() => clearFilter('dataset_scope')}
+          counts={facetCounts?.dataset_scope}
+          leerHinweis={t('filter.noneLeft')}
             allLabel={t('filter.allSelected')}
             emptyHint={t('filter.noneAvailable')}
             closeLabel={t('filter.close')}
+          />
+        )}
+        {showSoepFilters && (filterOptions?.sample_groups || []).length > 0 && (
+          <FacetChecks
+            label={t('filter.sampleGroup')}
+            options={(filterOptions?.sample_groups || []).map((g) => ({
+              value: g.value, label: sampleOptionLabel(g),
+            }))}
+            selected={filters.sample_group}
+            onToggle={(value) => toggleFilter('sample_group', value)}
+            onClear={() => clearFilter('sample_group')}
+          counts={facetCounts?.sample_group}
+          leerHinweis={t('filter.noneLeft')}
+            allLabel={t('filter.allSelected')}
+            emptyHint={t('filter.noneAvailable')}
+            closeLabel={t('filter.close')}
+            hinweis={t('filter.sampleGroupHint')}
           />
         )}
         <FacetChecks
@@ -729,24 +974,12 @@ function SOEPRagAdvisor({ apiUrl, mode = 'all', language = 'en' }) {
           selected={filters.dataset_label}
           onToggle={(value) => toggleFilter('dataset_label', value)}
           onClear={() => clearFilter('dataset_label')}
+          counts={facetCounts?.dataset_label}
+          leerHinweis={t('filter.noneLeft')}
           allLabel={t('filter.allSelected')}
           emptyHint={t('filter.noneAvailable')}
           closeLabel={t('filter.close')}
         />
-        {showSoepFilters && (filterOptions?.sample_groups || []).length > 0 && (
-          <FacetChecks
-            label={t('filter.sampleGroup')}
-            options={(filterOptions?.sample_groups || []).map((g) => ({
-              value: g.value, label: sampleOptionLabel(g),
-            }))}
-            selected={filters.sample_group}
-            onToggle={(value) => toggleFilter('sample_group', value)}
-            onClear={() => clearFilter('sample_group')}
-            allLabel={t('filter.allSelected')}
-            emptyHint={t('filter.noneAvailable')}
-            closeLabel={t('filter.close')}
-          />
-        )}
         {showRegionalFilters && (
           <FacetChecks
             label={t('filter.spatialLevel')}
@@ -756,6 +989,8 @@ function SOEPRagAdvisor({ apiUrl, mode = 'all', language = 'en' }) {
             selected={filters.spatial_level}
             onToggle={(value) => toggleFilter('spatial_level', value)}
             onClear={() => clearFilter('spatial_level')}
+          counts={facetCounts?.spatial_level}
+          leerHinweis={t('filter.noneLeft')}
             allLabel={t('filter.allSelected')}
             emptyHint={t('filter.noneAvailable')}
             closeLabel={t('filter.close')}
@@ -774,6 +1009,8 @@ function SOEPRagAdvisor({ apiUrl, mode = 'all', language = 'en' }) {
             selected={filters.theme}
             onToggle={(value) => toggleFilter('theme', value)}
             onClear={() => clearFilter('theme')}
+          counts={facetCounts?.theme}
+          leerHinweis={t('filter.noneLeft')}
             allLabel={t('filter.allSelected')}
             emptyHint={t('filter.noneAvailable')}
             closeLabel={t('filter.close')}

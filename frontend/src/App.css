@@ -1209,6 +1209,46 @@ button, input, select, textarea,
 
 /* "Nothing stands out" note above the result list. A note, not a warning: the results are
    still shown, in the same order. */
+/* Die Liste stammt noch aus der Suche vor der Filteränderung. Auffälliger als der ruhige
+   Hinweis darüber, weil er sonst genau von den Lesern übersehen wird, die ihn brauchen. */
+.results-stale {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0.75rem 0 0 0;
+  padding: 0.6rem 0.8rem;
+  /* Ein Farbton, nicht zwei: der blaue Rand auf rosa Grund las sich wie zwei Hinweise
+     übereinander. Der Akzent der Anwendung ist blau, also ist es auch dieser hier. */
+  border-left: 3px solid var(--accent, #60a5fa);
+  background: var(--accent-soft, rgba(59, 130, 246, 0.14));
+  border-radius: 0 6px 6px 0;
+  font-size: 0.9rem;
+}
+
+/* Was alle Treffer teilen, einmal über der Liste. Ruhig gesetzt: es ist der Rahmen, in dem
+   die Treffer stehen, nicht einer von ihnen. */
+.results-uniform {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35rem 0.9rem;
+  margin: 0.75rem 0 0 0;
+  padding: 0.5rem 0.8rem;
+  border-left: 3px solid var(--border, #cbd5e1);
+  background: var(--surface-2, rgba(148, 163, 184, 0.08));
+  border-radius: 0 6px 6px 0;
+  font-size: 0.85rem;
+}
+.results-uniform-label { color: var(--muted, #64748b); }
+.results-uniform-item { white-space: nowrap; }
+.results-uniform-key {
+  color: var(--muted, #64748b);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 .results-flat {
   margin: 0.75rem 0 0 0;
   padding: 0.6rem 0.8rem;
@@ -1332,6 +1372,25 @@ button, input, select, textarea,
    not as an overlay, because the filter column scrolls and would clip a positioned panel. */
 .facet-label {
   display: block;
+}
+
+/* Was mit der bisherigen Auswahl nichts mehr übrig ließe: sichtbar, aber nicht wählbar. */
+.facet-hint {
+  margin: 0 0 0.5rem 0;
+  padding-bottom: 0.45rem;
+  border-bottom: 1px solid var(--border, #e2e8f0);
+  font-size: 0.76rem;
+  line-height: 1.35;
+  color: var(--muted, #64748b);
+}
+.facet-item.is-empty { opacity: 0.45; cursor: not-allowed; }
+.facet-item.is-empty input { cursor: not-allowed; }
+.facet-count {
+  margin-left: auto;
+  padding-left: 0.6rem;
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted, #64748b);
 }
 
 .facet-trigger {
@@ -1509,4 +1568,15 @@ button, input, select, textarea,
 .facet.drops-up .facet-actions {
   position: sticky;
   bottom: 0;
+}
+
+/* Der Hinweis auf die anderen Fassungen desselben Maßes. Er warnt, also darf er nicht wie die
+   übrigen Fußnoten der Trefferzeile aussehen, und er darf die Zeile auch nicht dominieren: die
+   meisten Treffer sind in Ordnung, und die Warnung ist eine Frage, keine Fehlermeldung. */
+.result-register {
+  margin: .35rem 0 0;
+  padding-left: .6rem;
+  border-left: 2px solid var(--accent, #b3121b);
+  font-size: .88em;
+  color: var(--muted, #555);
 }
