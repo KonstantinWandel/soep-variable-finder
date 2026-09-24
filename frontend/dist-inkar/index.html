@@ -2,13 +2,84 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/brand/favicon-uni-bielefeld.png" />
+    <link rel="apple-touch-icon" href="/brand/apple-touch-uni-bielefeld.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>frontend</title>
-    <script type="module" crossorigin src="/assets/index-rp4ru2cs.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-D3SKxzP5.css">
+    <title>GeoDB</title>
+    <meta name="description" content="Semantische Suche in Beschreibungen deutscher Geodaten: 12 501 Indikatoren, Tabellen und Datensätze aus 41 Datenquellen. Nur Metadaten." />
+    <!-- The build passes VITE_PAGE_TITLE, VITE_PAGE_DESCRIPTION, VITE_SITE_URL and VITE_DOI per
+         deployment; frontend/build.sh sets all four. Without them the raw placeholders were served
+         to visitors and to link previews. -->
+    <link rel="canonical" href="https://geodb.geolab.soz.uni-bielefeld.de/" />
+    <meta name="robots" content="index, follow, max-snippet:-1" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="GeoDB" />
+    <meta property="og:description" content="Semantische Suche in Beschreibungen deutscher Geodaten: 12 501 Indikatoren, Tabellen und Datensätze aus 41 Datenquellen. Nur Metadaten." />
+    <meta property="og:url" content="https://geodb.geolab.soz.uni-bielefeld.de/" />
+    <meta property="og:site_name" content="GeoLAB, SOEP-RegioHub" />
+    <meta name="twitter:card" content="summary" />
+
+    <!-- Darstellung vor dem ersten Zeichnen. Das :root des Stylesheets ist der dunkle
+         Marineblau-Look, eine Seite, die ihr data-theme erst nach dem Start von React bekommt,
+         blitzt also bei jedem Besucher im Hellmodus kurz dunkel auf. Es gilt dieselbe Regel wie
+         auf der Projektseite: die Systemeinstellung entscheidet, eine Wahl von Hand gilt 24
+         Stunden und läuft danach ab. -->
+    <script>
+      (function () {
+        var TAG = 24 * 60 * 60 * 1000, wert = null;
+        try {
+          var roh = localStorage.getItem('geolab_theme');
+          if (roh && roh.charAt(0) === '{') {
+            var o = JSON.parse(roh), zeit = o && o.zeit;
+            // Ein Zeitstempel in der Zukunft kommt von einer zurückgestellten Uhr und gilt
+            // als abgelaufen, sonst bliebe die Wahl beliebig lange stehen.
+            if ((o.wert === 'dark' || o.wert === 'light') && typeof zeit === 'number'
+                && zeit <= Date.now() && Date.now() - zeit < TAG) wert = o.wert;
+          }
+        } catch (e) { /* localStorage kann gesperrt sein */ }
+        if (!wert) {
+          wert = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+            ? 'dark' : 'light';
+        }
+        document.documentElement.setAttribute('data-theme', wert);
+      })();
+    </script>
+
+    <!-- Structured data. A search interface gives a crawler almost no text of its own, so what it
+         is, who runs it and which archived release it corresponds to are stated here explicitly. -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": "GeoDB",
+        "url": "https://geodb.geolab.soz.uni-bielefeld.de/",
+        "description": "Semantische Suche in Beschreibungen deutscher Geodaten: 12 501 Indikatoren, Tabellen und Datensätze aus 41 Datenquellen. Nur Metadaten.",
+        "applicationCategory": "ReferenceApplication",
+        "operatingSystem": "Any (web browser)",
+        "isAccessibleForFree": true,
+        "inLanguage": ["de", "en"],
+        "publisher": {
+          "@type": "Organization",
+          "name": "Leibniz ScienceCampus SOEP-RegioHub, Universität Bielefeld",
+          "url": "https://geolab.soz.uni-bielefeld.de"
+        },
+        "sameAs": "https://doi.org/10.5281/zenodo.21134145"
+      }
+    </script>
+    <script type="module" crossorigin src="/assets/index-202609241411-navh9S07.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-202609241411-CO7O0GUv.css">
   </head>
   <body>
     <div id="root"></div>
+    <noscript>
+      <h1>GeoDB</h1>
+      <p>Semantische Suche in Beschreibungen deutscher Geodaten: 12 501 Indikatoren, Tabellen und Datensätze aus 41 Datenquellen. Nur Metadaten.</p>
+      <p>
+        The search itself needs JavaScript. What the index holds, where every record comes from and
+        how the links are verified is described on the project site:
+        <a href="https://geolab.soz.uni-bielefeld.de/">GeoLAB</a>, with the full source list on its
+        <a href="https://geolab.soz.uni-bielefeld.de/data-sources.html">data sources</a> page.
+      </p>
+    </noscript>
   </body>
 </html>
