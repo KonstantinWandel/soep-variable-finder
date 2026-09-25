@@ -1,6 +1,7 @@
 from fastapi import APIRouter, FastAPI
+from fastapi.responses import RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List, Optional, Union, Any
 import os
 import time
@@ -12,8 +13,11 @@ from app.services.soep_aggregator import SOEPAggregatorService
 from app.services.soep_search import SOEPSearchService
 from app.services.soep_rag_advisor import SOEPRagAdvisorService
 from app.services import usage_log
+from app.services.inkar_permalink import from_environment as inkar_permalinks_from_environment
 
 app = FastAPI(title="Destatis Local RAG", version="1.0.0")
+
+inkar_permalinks = inkar_permalinks_from_environment()
 
 ALLOW_ORIGINS = [
     origin.strip()
@@ -143,8 +147,13 @@ class SOEPRequest(BaseModel):
 
 
 class SOEPAdviceRequest(BaseModel):
-    question: str
-    top_k: int = 12
+    # Beide Grenzen sind Verfügbarkeitsschutz, nicht Geschmack. Ohne sie holte eine einzige
+    # Anfrage mit top_k=9999 den Dienst vom Netz: der Kandidatenpool wächst mit top_k, der
+    # Reranker bekam ihn nicht mehr in den Speicher, und der OOM-Killer beendete den Prozess.
+    # systemd startete neu, aber für anderthalb Minuten war der Finder für alle weg, und dazu
+    # genügt eine Zeile curl. Was zu groß ist, gehört mit 422 abgewiesen, nicht ausgeführt.
+    question: str = Field(..., max_length=2000)
+    top_k: int = Field(12, ge=1, le=100)
     # Every facet is multi-select in the UI, so these accept a list of values meaning "any of
     # these". A bare string still works: the API is called directly too, and older clients send
     # scalars.
@@ -203,6 +212,50 @@ async def soep_filter_options(source: Optional[str] = None, include_raw: bool = 
     # `include_raw` mirrors the UI checkbox: with the raw questionnaire files hidden, the
     # dataset dropdown must not offer the datasets only they live in.
     return soep_rag_advisor.get_filter_options(source, include_raw=include_raw)
+
+
+class FacetCountRequest(BaseModel):
+    """Die aktuelle Auswahl, so wie sie die Suche auch bekäme."""
+    dataset_scope: Union[str, List[str], None] = None
+    dataset_label: Union[str, List[str], None] = None
+    sample_group: Union[str, List[str], None] = None
+    spatial_level: Union[str, List[str], None] = None
+    nuts_level: Union[str, List[str], None] = None
+    theme: Union[str, List[str], None] = None
+    year_start: Optional[int] = None
+    year_end: Optional[int] = None
+    regional_only: bool = False
+    include_raw: bool = False
+
+
+@app.post("/api/soep/facet-counts")
+def soep_facet_counts(req: FacetCountRequest):
+    """Wie viele Sätze jede noch wählbare Auswahl übrig ließe.
+
+    Damit kann die Oberfläche ausgrauen, was nicht zusammenpasst: ein Datensatz und eine
+    Stichprobe, die darin nicht vorkommt, sind zusammen nichts, und das soll man sehen, bevor
+    man sucht und eine leere Liste bekommt. Jede Facette wird gegen die anderen gerechnet,
+    nie gegen sich selbst.
+    """
+    return soep_rag_advisor.facet_counts(req.model_dump())
+
+# INKAR has no address for a single indicator, so a link into it has to be a query stored on the
+# BBSR server. This endpoint creates that query the first time somebody opens an indicator and
+# reuses it afterwards, which keeps what we leave in their system to the indicators people
+# actually look at. See app/services/inkar_permalink.py; GEOLAB_INKAR_PERMALINKS=0 turns it off
+# and every link falls back to inkar.de.
+@app.get("/api/inkar/open/{m_id}")
+def inkar_open(m_id: str):
+    target = inkar_permalinks.link(m_id)
+    return RedirectResponse(url=target, status_code=302,
+                            headers={"X-Robots-Tag": "noindex, nofollow",
+                                     "Cache-Control": "no-store"})
+
+
+@app.get("/api/inkar/permalinks")
+def inkar_permalink_status():
+    return inkar_permalinks.status()
+
 
 @app.get("/health")
 def health_check():
