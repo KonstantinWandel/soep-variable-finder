@@ -54,12 +54,18 @@ as `pglabnet`, and a small preference for generated datasets over subsample inst
 - A cross-encoder, [`BAAI/bge-reranker-base`](https://huggingface.co/BAAI/bge-reranker-base), reads
   each of the best candidates together with the query and puts them in a new order. The final rank
   also counts shared words, and a typed variable name such as `pglabnet` goes straight to the top.
+- The items of one battery share a variable stem (`plh0406i01` to `plh0406i10`, or `plh0298_v1` and
+  `plh0298_v2`). Each battery takes one place in the list, shown by its best-matching item, and the
+  other items are listed under it, so a topic query shows twenty different variables rather than
+  ten items of the same question.
 - Filters by sample group, dataset, topic and survey years narrow the search beforehand.
 - The finder only retrieves: every hit is an existing metadata record, and nothing is generated.
 
-`scripts/eval_soep_search.py` is the retrieval test: 59 queries whose correct variables were fixed in
-advance. On 30 September 2026 a correct variable stood at rank 1 for 50 of them and within the top ten
-for 58.
+Two retrieval tests guard changes. `scripts/eval_soep_search.py` has 59 queries whose correct
+variables were fixed in advance; on 2 October 2026 a correct variable stood at rank 1 for 51 of them
+and within the top ten for 58. `scripts/eval_soep_concepts.py` has 46 queries that name a topic
+rather than a label ("Geschlechterrollen", "loneliness", "Wollen Zugewanderte dauerhaft in
+Deutschland bleiben?"); a relevant variable stood at rank 1 for 36 and within the top ten for all 46.
 
 ## Models
 
