@@ -51,7 +51,7 @@ as `pglabnet`, and a small preference for generated datasets over subsample inst
 - A query is turned into a vector the same way, and the variables with the closest vectors are the
   candidates. This is why "how often do people eat meat" finds `ple0179` "Wie oft Fleisch" although
   the two share no word.
-- A cross-encoder, [`BAAI/bge-reranker-base`](https://huggingface.co/BAAI/bge-reranker-base), reads
+- A cross-encoder, [`Alibaba-NLP/gte-multilingual-reranker-base`](https://huggingface.co/Alibaba-NLP/gte-multilingual-reranker-base), reads
   each of the best candidates together with the query and puts them in a new order. The final rank
   also counts shared words, and a typed variable name such as `pglabnet` goes straight to the top.
 - The items of one battery share a variable stem (`plh0406i01` to `plh0406i10`, or `plh0298_v1` and
@@ -62,17 +62,19 @@ as `pglabnet`, and a small preference for generated datasets over subsample inst
 - The finder only retrieves: every hit is an existing metadata record, and nothing is generated.
 
 Two retrieval tests guard changes. `scripts/eval_soep_search.py` has 59 queries whose correct
-variables were fixed in advance; on 2 October 2026 a correct variable stood at rank 1 for 51 of them
-and within the top ten for 58. `scripts/eval_soep_concepts.py` has 46 queries that name a topic
+variables were fixed in advance; on 2 October 2026 a correct variable stood at rank 1 for 49 of them
+and within the top ten for all 59. `scripts/eval_soep_concepts.py` has 46 queries that name a topic
 rather than a label ("Geschlechterrollen", "loneliness", "Wollen Zugewanderte dauerhaft in
-Deutschland bleiben?"); a relevant variable stood at rank 1 for 36 and within the top ten for all 46.
+Deutschland bleiben?"); a relevant variable stood at rank 1 for 40 and within the top ten for all 46.
 
 ## Models
 
 Downloaded from Hugging Face at runtime and cached locally:
 
 - `intfloat/multilingual-e5-large-instruct`, bi-encoder, MIT.
-- `BAAI/bge-reranker-base`, cross-encoder, MIT. Production runs an int8 ONNX export of it.
+- `Alibaba-NLP/gte-multilingual-reranker-base`, cross-encoder, Apache-2.0. Production runs an int8
+  ONNX export of it (from `onnx-community`). It replaced `BAAI/bge-reranker-base` (MIT) on
+  2 October 2026: of eleven rerankers compared, it found topic queries best at nearly the same speed.
 
 ## Building the index
 
