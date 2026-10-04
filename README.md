@@ -15,6 +15,13 @@ Bielefeld University and DIW Berlin.
 > Status: research prototype. Retrieval is semantic and imperfect; check a hit against the SOEP
 > documentation before you use it.
 
+Shared GeoDB code changes of 4 October 2026 are scoped to regional-provider retrieval; they do
+not add GESIS to the SOEP corpus. [The paired report](SHARED_GEODB_CHECK_REPORT.json) verifies
+identical complete ranked identities and scores for all 59 SOEP regression queries. Metadata,
+embeddings, production model settings and the live SOEP frontend were not changed. Nine shared
+candidate/identity tests are in `scripts/test_geodb_*.py`; the mirrored frontend adds optional
+metadata-licence/provenance export fields without making new SOEP licence claims.
+
 ## Where the metadata comes from
 
 125,496 variables from the 622 datasets of SOEP-Core v41. The raw per-wave files are hidden by
