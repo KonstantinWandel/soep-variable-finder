@@ -10,6 +10,13 @@ Datenschutzstand vom 2026-10-04: `PRIVACY_OPERATIONS.md` beschreibt Einwilligung
 Trefferbewertungen, private Browser-Statistik, 90-Tage-Löschung und Backup-Ausschlüsse. Auf der VM
 läuft dafür `geolab-privacy-retention.timer`. Monatszahlen sind Browser mit Einwilligung, keine
 nachgewiesenen Einzelpersonen. Die Bewertungen ändern die Suche nicht automatisch.
+Suchtexte werden nur nach einer gesonderten Einwilligung zur Qualitätsprüfung gespeichert;
+alte Rohprotokolle wurden auf Nutzerwunsch durch reine Tageszählungen ersetzt. Der Banner steht
+unten, alle drei Optionen beginnen ausgeschaltet. Tageszählungen ohne Texte sind mit
+`privacy_admin.py service-metrics` abrufbar. Die Website-Karte verwendet keine externen CARTO-Kacheln
+mehr. Zum Vorgänger-Plotter siehe `../geolab_regiohub/DATAEXPLORER_HANDOFF.md`.
+`DESCRIPTION_REVIEW.md` erklärt die neue Darstellung offizieller Beschreibungen und den
+separaten Embedding-Vergleich. Die produktiven Embeddings wurden dabei nicht ersetzt.
 
 ## Was es gibt
 
@@ -141,6 +148,25 @@ grep -o 'assets/index-[A-Za-z0-9_-]*\.js' frontend/dist-inkar/index.html
 Beide Zeichenketten müssen gleich sein. Ein fehlgeschlagener Frontend-Bau liefert sonst
 unbemerkt das alte Bündel aus, und `rsync` meldet trotzdem Erfolg.
 
+**Alte Bündel nie löschen.** Wer die Seite schon einmal besucht hat, kann noch ein älteres
+`index.html` im Browser haben und fragt dann nach einem alten Bündelnamen. Fehlt der, sah der
+Besucher bis zum 2026-09-05 einen weißen Bildschirm, und zwar dauerhaft, weil der Server die
+fehlende Datei mit `200`, HTML-Inhalt und einem Jahr Cache beantwortet hat. Der Server sagt jetzt
+sauber `404`, und die Bündel werden beim Ausliefern nur ergänzt, nicht ersetzt (`rsync` ohne
+`--delete` für `assets/`). Der Wochenbericht prüft beides.
+
+**Wenn jemand einen weißen Bildschirm meldet:** zuerst prüfen, ob es am Server liegt.
+
+```bash
+curl -sI https://geodb.geolab.soz.uni-bielefeld.de/$(curl -s https://geodb.geolab.soz.uni-bielefeld.de/ \
+  | grep -o 'assets/index-[A-Za-z0-9_-]*\.js') | grep -i content-type
+```
+
+Dort muss `text/javascript` stehen. Steht dort `text/html`, ist es der oben beschriebene Fehler.
+Steht dort das Richtige, hat der Browser noch eine vergiftete Datei aus der Zeit davor im Speicher:
+das lässt sich nur dort beheben, mit einem harten Neuladen (Strg+Umschalt+R, auf dem Mac
+Cmd+Umschalt+R) oder über „Websitedaten löschen". Einmal genügt.
+
 ## Routine 4: eine Seite antwortet nicht
 
 ```bash
@@ -225,6 +251,39 @@ ssh vm "sudo systemctl reload caddy"    # wenn das ausgelieferte älter ist als 
 - **Keine Forschungsdaten in die Repos.** Sie enthalten Quelltext, keine Daten und keine Modelle.
 - **RegioPress-Volltexte** (aus dem Genios-Bestand) dürfen nicht öffentlich werden. Sie haben mit
   den Findern nichts zu tun, liegen aber auf derselben Maschine; die Regel gilt trotzdem.
+- **INKAR/BBSR: sparsam bleiben.** Zwischen dem Projekt und dem BBSR besteht eine eigene
+  Vereinbarung, deren Reichweite offen ist. Konstantin hat am 2026-09-06 entschieden, die
+  Tiefenlinks trotzdem zu bauen, weil eine Klärung Monate dauern kann. Was daraus folgt: keine
+  Serienabrufe gegen die Anwendung, kein Abgrasen, und die gespeicherten Abfragen entstehen nur
+  einzeln beim ersten Klick (siehe unten). Lesen der öffentlichen Kataloge und Geodienste ist
+  ohnehin unbedenklich.
+
+## Die INKAR-Tiefenlinks
+
+INKAR kennt keine Adresse für einen einzelnen Indikator. Das Einzige, was seine Adresszeile
+transportiert, ist die Kennung einer **auf dem BBSR-Server gespeicherten Abfrage**. Deshalb zeigen
+unsere INKAR-Treffer auf `geodb.geolab.soz.uni-bielefeld.de/api/inkar/open/<M_ID>`. Dieser Punkt
+legt die Abfrage beim **ersten** Klick an, merkt sich die Kennung und leitet danach immer dorthin
+weiter. Für Indikatoren, die niemand öffnet, entsteht beim BBSR nichts.
+
+- Anlage und Ablage: `backend/app/services/inkar_permalink.py`, Ablage
+  `/opt/geolab/app/destatis-rag/soep_metadata_output/inkar_permalinks.json`.
+- Zuordnung der Kennungen: `data_sources/22-inkar/raw/wizard_katalog.json`, erzeugt von
+  `scripts/fetch_inkar_wizard_catalogue.py` (nach einer neuen INKAR-Ausgabe neu erzeugen).
+- Ansehen, prüfen, zurücknehmen, alles auf der VM:
+
+```bash
+python3 ~/health/repo/scripts/inkar_permalinks_admin.py --list
+python3 ~/health/repo/scripts/inkar_permalinks_admin.py --check 5
+python3 ~/health/repo/scripts/inkar_permalinks_admin.py --delete-all   # alles zurücknehmen
+```
+
+- **Abschalten** geht ohne neuen Index: `GEOLAB_INKAR_PERMALINKS=0` in der Dienstumgebung setzen und
+  `sudo systemctl restart geolab-inkar`. Danach führt jeder INKAR-Treffer wieder auf inkar.de.
+- Der Wochenbericht prüft eine Stichprobe der angelegten Abfragen (`inkar=ok(3)` in der
+  Zusammenfassung). Fehlende sind kein Notfall: der Dienst legt sie beim nächsten Klick neu an.
+- Falls sich das BBSR meldet: `--delete-all` entfernt jede von uns angelegte Abfrage, danach
+  `GEOLAB_INKAR_PERMALINKS=0`. Beides zusammen dauert eine Minute.
 
 ## Was ein Skript nicht kann
 
